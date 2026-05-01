@@ -1,4 +1,4 @@
-# Kalypso Scheduler Java Migration - Agent Instructions
+# Kalypso Scheduler Java Operator - Agent Instructions
 
 ## Overview
 
