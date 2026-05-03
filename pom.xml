@@ -13,44 +13,68 @@
     <description>Java-based Kubernetes operator for Kalypso scheduler - migrated from Go</description>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <java.version>17</java.version>
+        <maven.compiler.source>${java.version}</maven.compiler.source>
+        <maven.compiler.target>${java.version}</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <javaoperatorsdk.version>5.3.2</javaoperatorsdk.version>
         <kubernetes.client.version>6.11.0</kubernetes.client.version>
         <jackson.version>2.16.1</jackson.version>
         <freemarker.version>2.3.32</freemarker.version>
-        <slf4j.version>2.0.11</slf4j.version>
+        <slf4j.version>2.0.17</slf4j.version>
+        <log4j.version>2.25.3</log4j.version>
         <junit.version>5.10.1</junit.version>
-        <mockito.version>5.7.1</mockito.version>
+        <mockito.version>5.11.0</mockito.version>
+        <fabric8-client.version>7.6.1</fabric8-client.version>
     </properties>
 
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.javaoperatorsdk</groupId>
+                <artifactId>operator-framework-bom</artifactId>
+                <version>${javaoperatorsdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Adding Fabric8 BOM for consistent versions -->
+            <dependency>
+                <groupId>io.fabric8</groupId>
+                <artifactId>kubernetes-client-bom</artifactId>
+                <version>${kubernetes.client.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
-        <!-- Java Operator SDK -->
+        <!-- Java Operator SDK (Matching your working boilerplate) -->
         <dependency>
             <groupId>io.javaoperatorsdk</groupId>
-            <artifactId>operator-sdk</artifactId>
-            <version>${javaoperatorsdk.version}</version>
+            <artifactId>operator-framework</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.javaoperatorsdk</groupId>
+            <artifactId>operator-framework-junit</artifactId>
+            <scope>test</scope>
         </dependency>
 
         <!-- Kubernetes Client -->
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-client</artifactId>
-            <version>${kubernetes.client.version}</version>
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-model-core</artifactId>
-            <version>${kubernetes.client.version}</version>
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-model-apps</artifactId>
-            <version>${kubernetes.client.version}</version>
         </dependency>
 
-        <!-- Jackson for YAML/JSON serialization -->
+        <!-- Jackson for YAML/JSON -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
@@ -62,37 +86,42 @@
             <version>${jackson.version}</version>
         </dependency>
 
-        <!-- Template Engine (Freemarker) -->
+        <!-- Template Engine -->
         <dependency>
             <groupId>org.freemarker</groupId>
             <artifactId>freemarker</artifactId>
             <version>${freemarker.version}</version>
         </dependency>
 
-        <!-- GitHub API Client -->
+        <!-- GitHub API -->
         <dependency>
             <groupId>org.kohsuke</groupId>
             <artifactId>github-api</artifactId>
             <version>1.321</version>
         </dependency>
 
-        <!-- JSON Schema Validation -->
+        <!-- Fixed JSON Schema GroupId -->
         <dependency>
-            <groupId>com.everit</groupId>
+            <groupId>com.github.erosb</groupId>
             <artifactId>everit-json-schema</artifactId>
             <version>1.14.4</version>
         </dependency>
 
-        <!-- Logging -->
+        <!-- Logging (Matching boilerplate versions) -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>${slf4j.version}</version>
         </dependency>
         <dependency>
-            <groupId>ch.qos.logback</groupId>
-            <artifactId>logback-classic</artifactId>
-            <version>1.4.14</version>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j2-impl</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>${log4j.version}</version>
         </dependency>
 
         <!-- Testing -->
@@ -120,12 +149,6 @@
             <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>io.javaoperatorsdk</groupId>
-            <artifactId>operator-sdk-testing</artifactId>
-            <version>${javaoperatorsdk.version}</version>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 
     <build>
@@ -134,28 +157,20 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
-                <configuration>
-                    <source>17</source>
-                    <target>17</target>
-                </configuration>
             </plugin>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.1.2</version>
+                <groupId>io.fabric8</groupId>
+                <artifactId>crd-generator-maven-plugin</artifactId>
+                <version>${fabric8-client.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <version>3.3.0</version>
-                <configuration>
-                    <archive>
-                        <manifest>
-                            <mainClass>io.kalypso.scheduler.KalypsoSchedulerOperator</mainClass>
-                        </manifest>
-                    </archive>
-                </configuration>
-            </plugin>
+            <!-- Shade plugin to create the executable jar -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -179,5 +194,4 @@
             </plugin>
         </plugins>
     </build>
-
 </project>
