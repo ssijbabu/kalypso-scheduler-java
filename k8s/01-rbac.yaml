@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kalypso-scheduler
+  namespace: kalypso-java
+---
+# Full access to all Kalypso CRDs and their subresources.
+# Defined as ClusterRole because CRDs are cluster-scoped objects and the
+# operator watches resources across the namespaces it is configured for.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kalypso-scheduler-java
+rules:
+  - apiGroups: ["scheduler.kalypso.io"]
+    resources: ["*", "*/status", "*/finalizers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  # Leader-election lease (needed when HA is enabled)
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kalypso-scheduler-java
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kalypso-scheduler-java
+subjects:
+  - kind: ServiceAccount
+    name: kalypso-scheduler
+    namespace: kalypso-java

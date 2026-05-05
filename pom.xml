@@ -192,6 +192,117 @@
                     </execution>
                 </executions>
             </plugin>
+
+            <!--
+                Integration test runner.
+                Runs **/*IT.java classes during the integration-test/verify phases.
+                Skip with: mvn verify -DskipITs
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.2.5</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+                Cluster lifecycle around integration tests.
+                Executions run in declaration order within each phase.
+
+                pre-integration-test:
+                  1. docker build   – creates kalypso-scheduler:latest from the shaded jar
+                  2. apply-crds     – pushes generated CRD schemas to the cluster
+                  3. k8s-deploy     – creates namespace, RBAC, and operator Deployment
+                  4. k8s-wait       – blocks until the Deployment has minimum ready replicas
+
+                post-integration-test:
+                  5. k8s-cleanup    – tears down namespace, RBAC, and Deployment
+                     (CRDs are left intact so the existing Go operator is unaffected)
+            -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>docker-build</id>
+                        <phase>pre-integration-test</phase>
+                        <goals><goal>exec</goal></goals>
+                        <configuration>
+                            <executable>docker</executable>
+                            <arguments>
+                                <argument>build</argument>
+                                <argument>-t</argument>
+                                <argument>kalypso-scheduler:latest</argument>
+                                <argument>.</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>apply-crds</id>
+                        <phase>pre-integration-test</phase>
+                        <goals><goal>exec</goal></goals>
+                        <configuration>
+                            <executable>kubectl</executable>
+                            <arguments>
+                                <argument>apply</argument>
+                                <argument>-f</argument>
+                                <argument>${project.build.outputDirectory}/META-INF/fabric8/</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>k8s-deploy</id>
+                        <phase>pre-integration-test</phase>
+                        <goals><goal>exec</goal></goals>
+                        <configuration>
+                            <executable>kubectl</executable>
+                            <arguments>
+                                <argument>apply</argument>
+                                <argument>-f</argument>
+                                <argument>k8s/</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>k8s-wait</id>
+                        <phase>pre-integration-test</phase>
+                        <goals><goal>exec</goal></goals>
+                        <configuration>
+                            <executable>kubectl</executable>
+                            <arguments>
+                                <argument>rollout</argument>
+                                <argument>status</argument>
+                                <argument>deployment/kalypso-scheduler</argument>
+                                <argument>-n</argument>
+                                <argument>kalypso-java</argument>
+                                <argument>--timeout=2m</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>k8s-cleanup</id>
+                        <phase>post-integration-test</phase>
+                        <goals><goal>exec</goal></goals>
+                        <configuration>
+                            <executable>kubectl</executable>
+                            <arguments>
+                                <argument>delete</argument>
+                                <argument>-f</argument>
+                                <argument>k8s/</argument>
+                                <argument>--ignore-not-found=true</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>

@@ -708,8 +708,8 @@ Branch: "main"
 
 ## Deliverables Checklist
 
-- [ ] Day 0: Maven project structure, dependencies, build working
-- [ ] Day 1: Template & ClusterType CRDs compiled, tests passing
+- [x] Day 0: Maven project structure, dependencies, build working
+- [x] Day 1: Template & ClusterType CRDs compiled, tests passing
 - [ ] Day 2: ConfigSchema & BaseRepo CRDs with status support
 - [ ] Day 3: Environment, WorkloadRegistration, Workload CRDs
 - [ ] Day 4: DeploymentTarget, SchedulingPolicy CRDs

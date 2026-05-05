@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kalypso-scheduler
+  namespace: kalypso-java
+  labels:
+    app: kalypso-scheduler
+    app.kubernetes.io/name: kalypso-scheduler-java
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kalypso-scheduler
+  template:
+    metadata:
+      labels:
+        app: kalypso-scheduler
+    spec:
+      serviceAccountName: kalypso-scheduler
+      containers:
+        - name: operator
+          image: kalypso-scheduler:latest
+          # Never pull — use the image built locally by docker build in pre-integration-test.
+          # Works because Docker Desktop shares its daemon with the cluster.
+          imagePullPolicy: Never
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          env:
+            - name: OPERATOR_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
