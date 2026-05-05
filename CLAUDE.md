@@ -35,6 +35,9 @@ docker build -t kalypso-scheduler:latest .
 - fabric8 Kubernetes client: 6.11.0
 - Jackson: 2.16.1, Freemarker: 2.3.32, kohsuke/github-api: 1.321
 
+### Dependency Rules
+All code must use only the APIs and idioms of the library versions declared in `pom.xml`. **Do not upgrade or downgrade any existing dependency version.** New dependencies may be added if genuinely needed, but existing versions are frozen. Before suggesting an API, verify it exists in the declared version — do not assume newer APIs are available.
+
 ### Package Structure
 ```
 io.kalypso.scheduler/
@@ -115,7 +118,7 @@ Every public class and method requires JavaDoc (purpose, params, return, excepti
 ### Testing
 - `@ExtendWith(MockitoExtension.class)` for reconciler unit tests; mock `KubernetesClient` and services
 - Method naming: `test<Feature><Scenario><Outcome>()`
-- Integration tests use java-operator-sdk testing utilities or fabric8 mock server
+- Integration tests (`*IT.java`) deploy the operator to the local Docker Desktop Kubernetes cluster and are **mandatory** — never skip with `-DskipITs`
 - CI must pass `mvn clean verify`
 
 ### Migration Tracking
