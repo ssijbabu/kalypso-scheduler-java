@@ -4,28 +4,56 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
+import io.kalypso.scheduler.api.v1alpha1.Assignment;
+import io.kalypso.scheduler.api.v1alpha1.AssignmentList;
+import io.kalypso.scheduler.api.v1alpha1.AssignmentPackage;
+import io.kalypso.scheduler.api.v1alpha1.AssignmentPackageList;
 import io.kalypso.scheduler.api.v1alpha1.BaseRepo;
 import io.kalypso.scheduler.api.v1alpha1.BaseRepoList;
 import io.kalypso.scheduler.api.v1alpha1.ClusterType;
 import io.kalypso.scheduler.api.v1alpha1.ClusterTypeList;
 import io.kalypso.scheduler.api.v1alpha1.ConfigSchema;
 import io.kalypso.scheduler.api.v1alpha1.ConfigSchemaList;
+import io.kalypso.scheduler.api.v1alpha1.DeploymentTarget;
+import io.kalypso.scheduler.api.v1alpha1.DeploymentTargetList;
+import io.kalypso.scheduler.api.v1alpha1.Environment;
+import io.kalypso.scheduler.api.v1alpha1.EnvironmentList;
+import io.kalypso.scheduler.api.v1alpha1.GitOpsRepo;
+import io.kalypso.scheduler.api.v1alpha1.GitOpsRepoList;
+import io.kalypso.scheduler.api.v1alpha1.SchedulingPolicy;
+import io.kalypso.scheduler.api.v1alpha1.SchedulingPolicyList;
 import io.kalypso.scheduler.api.v1alpha1.Template;
 import io.kalypso.scheduler.api.v1alpha1.TemplateList;
+import io.kalypso.scheduler.api.v1alpha1.Workload;
+import io.kalypso.scheduler.api.v1alpha1.WorkloadList;
+import io.kalypso.scheduler.api.v1alpha1.WorkloadRegistration;
+import io.kalypso.scheduler.api.v1alpha1.WorkloadRegistrationList;
+import io.kalypso.scheduler.api.v1alpha1.spec.AssignmentPackageSpec;
+import io.kalypso.scheduler.api.v1alpha1.spec.AssignmentSpec;
 import io.kalypso.scheduler.api.v1alpha1.spec.BaseRepoSpec;
 import io.kalypso.scheduler.api.v1alpha1.spec.ClusterConfigType;
 import io.kalypso.scheduler.api.v1alpha1.spec.ClusterTypeSpec;
 import io.kalypso.scheduler.api.v1alpha1.spec.ConfigSchemaSpec;
 import io.kalypso.scheduler.api.v1alpha1.spec.ContentType;
+import io.kalypso.scheduler.api.v1alpha1.spec.DeploymentTargetSpec;
+import io.kalypso.scheduler.api.v1alpha1.spec.EnvironmentSpec;
+import io.kalypso.scheduler.api.v1alpha1.spec.GitOpsRepoSpec;
+import io.kalypso.scheduler.api.v1alpha1.spec.RepositoryReference;
+import io.kalypso.scheduler.api.v1alpha1.spec.SchedulingPolicySpec;
+import io.kalypso.scheduler.api.v1alpha1.spec.Selector;
 import io.kalypso.scheduler.api.v1alpha1.spec.TemplateManifest;
 import io.kalypso.scheduler.api.v1alpha1.spec.TemplateSpec;
 import io.kalypso.scheduler.api.v1alpha1.spec.TemplateType;
+import io.kalypso.scheduler.api.v1alpha1.spec.WorkloadRegistrationSpec;
+import io.kalypso.scheduler.api.v1alpha1.spec.WorkloadSpec;
+import io.kalypso.scheduler.api.v1alpha1.spec.WorkloadTarget;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -75,6 +103,14 @@ class OperatorIntegrationIT {
         deleteQuietly("test-configschema-crud");
         deleteQuietly("test-baserepo-crud");
         deleteQuietly("test-baserepo-nocommit");
+        deleteQuietly("test-environment-crud");
+        deleteQuietly("test-workloadreg-crud");
+        deleteQuietly("test-workload-crud");
+        deleteQuietly("test-deploymenttarget-crud");
+        deleteQuietly("test-schedulingpolicy-crud");
+        deleteQuietly("test-assignment-crud");
+        deleteQuietly("test-assignmentpackage-crud");
+        deleteQuietly("test-gitopsrepo-crud");
         if (client != null) {
             client.close();
         }
@@ -157,6 +193,9 @@ class OperatorIntegrationIT {
     /**
      * Polls pod logs once per second until {@code expectedLine} appears or {@code timeoutSeconds} elapses.
      *
+     * @param podName        the name of the pod to poll
+     * @param expectedLine   the log line to wait for
+     * @param timeoutSeconds maximum number of seconds to wait
      * @return the last log snapshot retrieved (may or may not contain the expected line)
      */
     private String pollForLog(String podName, String expectedLine, int timeoutSeconds) {
@@ -444,6 +483,293 @@ class OperatorIntegrationIT {
     }
 
     // -------------------------------------------------------------------------
+    // Environment CRD
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates an Environment resource via the Kubernetes API and reads it back.
+     * Verifies that the nested {@code RepositoryReference} in {@code controlPlane}
+     * survives serialization through the API server unchanged.
+     */
+    @Test
+    void testEnvironmentResourceCrudRoundTrip() {
+        Environment environment = buildEnvironment("test-environment-crud",
+                "https://github.com/org/control-plane", "main", "./environments/prod");
+
+        Environment created = client.resources(Environment.class, EnvironmentList.class)
+                .inNamespace(NAMESPACE)
+                .resource(environment)
+                .serverSideApply();
+
+        assertNotNull(created.getMetadata().getUid(), "API server must assign a UID");
+        assertEquals("test-environment-crud", created.getMetadata().getName());
+        assertNotNull(created.getSpec().getControlPlane());
+        assertEquals("https://github.com/org/control-plane", created.getSpec().getControlPlane().getRepo());
+        assertEquals("main", created.getSpec().getControlPlane().getBranch());
+        assertEquals("./environments/prod", created.getSpec().getControlPlane().getPath());
+
+        Environment fetched = client.resources(Environment.class, EnvironmentList.class)
+                .inNamespace(NAMESPACE)
+                .withName("test-environment-crud")
+                .get();
+
+        assertNotNull(fetched, "Environment must be retrievable after creation");
+        assertNotNull(fetched.getSpec().getControlPlane());
+        assertEquals("https://github.com/org/control-plane", fetched.getSpec().getControlPlane().getRepo());
+        assertEquals("./environments/prod", fetched.getSpec().getControlPlane().getPath());
+    }
+
+    // -------------------------------------------------------------------------
+    // WorkloadRegistration CRD
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates a WorkloadRegistration resource via the Kubernetes API and reads it back.
+     * Verifies that the {@code workload} repository reference and {@code workspace}
+     * fields survive serialization through the API server unchanged.
+     */
+    @Test
+    void testWorkloadRegistrationResourceCrudRoundTrip() {
+        WorkloadRegistration wreg = buildWorkloadRegistration("test-workloadreg-crud",
+                "https://github.com/org/workloads", "main", "./apps/myapp", "team-alpha");
+
+        WorkloadRegistration created = client.resources(WorkloadRegistration.class, WorkloadRegistrationList.class)
+                .inNamespace(NAMESPACE)
+                .resource(wreg)
+                .serverSideApply();
+
+        assertNotNull(created.getMetadata().getUid(), "API server must assign a UID");
+        assertEquals("test-workloadreg-crud", created.getMetadata().getName());
+        assertNotNull(created.getSpec().getWorkload());
+        assertEquals("https://github.com/org/workloads", created.getSpec().getWorkload().getRepo());
+        assertEquals("team-alpha", created.getSpec().getWorkspace());
+
+        WorkloadRegistration fetched = client.resources(WorkloadRegistration.class, WorkloadRegistrationList.class)
+                .inNamespace(NAMESPACE)
+                .withName("test-workloadreg-crud")
+                .get();
+
+        assertNotNull(fetched, "WorkloadRegistration must be retrievable after creation");
+        assertEquals("./apps/myapp", fetched.getSpec().getWorkload().getPath());
+        assertEquals("team-alpha", fetched.getSpec().getWorkspace());
+    }
+
+    // -------------------------------------------------------------------------
+    // Workload CRD
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates a Workload resource with a deployment target list via the Kubernetes API
+     * and reads it back. Verifies the list and nested repository reference survive
+     * serialization through the API server.
+     */
+    @Test
+    void testWorkloadResourceCrudRoundTrip() {
+        Workload workload = buildWorkload("test-workload-crud",
+                "prod-east", "https://github.com/org/wl", "main", "./targets/east");
+
+        Workload created = client.resources(Workload.class, WorkloadList.class)
+                .inNamespace(NAMESPACE)
+                .resource(workload)
+                .serverSideApply();
+
+        assertNotNull(created.getMetadata().getUid(), "API server must assign a UID");
+        assertEquals("test-workload-crud", created.getMetadata().getName());
+        assertNotNull(created.getSpec().getDeploymentTargets());
+        assertEquals(1, created.getSpec().getDeploymentTargets().size());
+        assertEquals("prod-east", created.getSpec().getDeploymentTargets().get(0).getName());
+
+        Workload fetched = client.resources(Workload.class, WorkloadList.class)
+                .inNamespace(NAMESPACE)
+                .withName("test-workload-crud")
+                .get();
+
+        assertNotNull(fetched, "Workload must be retrievable after creation");
+        assertEquals(1, fetched.getSpec().getDeploymentTargets().size());
+        assertEquals("prod-east", fetched.getSpec().getDeploymentTargets().get(0).getName());
+        assertEquals("./targets/east",
+                fetched.getSpec().getDeploymentTargets().get(0).getManifests().getPath());
+    }
+
+    // -------------------------------------------------------------------------
+    // DeploymentTarget CRD
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates a DeploymentTarget resource with labels and manifests via the Kubernetes API
+     * and reads it back. Verifies all spec fields survive serialization.
+     */
+    @Test
+    void testDeploymentTargetResourceCrudRoundTrip() {
+        DeploymentTarget dt = buildDeploymentTarget("test-deploymenttarget-crud",
+                "prod-east-cluster", "prod",
+                Map.of("region", "east-us", "tier", "production"),
+                "https://github.com/org/infra", "main", "./clusters/prod-east");
+
+        DeploymentTarget created = client.resources(DeploymentTarget.class, DeploymentTargetList.class)
+                .inNamespace(NAMESPACE)
+                .resource(dt)
+                .serverSideApply();
+
+        assertNotNull(created.getMetadata().getUid(), "API server must assign a UID");
+        assertEquals("test-deploymenttarget-crud", created.getMetadata().getName());
+        assertEquals("prod-east-cluster", created.getSpec().getName());
+        assertEquals("prod", created.getSpec().getEnvironment());
+        assertNotNull(created.getSpec().getLabels());
+
+        DeploymentTarget fetched = client.resources(DeploymentTarget.class, DeploymentTargetList.class)
+                .inNamespace(NAMESPACE)
+                .withName("test-deploymenttarget-crud")
+                .get();
+
+        assertNotNull(fetched, "DeploymentTarget must be retrievable after creation");
+        assertEquals("prod-east-cluster", fetched.getSpec().getName());
+        assertEquals("east-us", fetched.getSpec().getLabels().get("region"));
+        assertEquals("./clusters/prod-east", fetched.getSpec().getManifests().getPath());
+    }
+
+    // -------------------------------------------------------------------------
+    // SchedulingPolicy CRD
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates a SchedulingPolicy resource with both selectors via the Kubernetes API
+     * and reads it back. Verifies nested selectors and label maps survive serialization.
+     */
+    @Test
+    void testSchedulingPolicyResourceCrudRoundTrip() {
+        SchedulingPolicy sp = buildSchedulingPolicy("test-schedulingpolicy-crud",
+                "team-alpha", Map.of("tier", "production"),
+                null, Map.of("size", "large"));
+
+        SchedulingPolicy created = client.resources(SchedulingPolicy.class, SchedulingPolicyList.class)
+                .inNamespace(NAMESPACE)
+                .resource(sp)
+                .serverSideApply();
+
+        assertNotNull(created.getMetadata().getUid(), "API server must assign a UID");
+        assertEquals("test-schedulingpolicy-crud", created.getMetadata().getName());
+        assertNotNull(created.getSpec().getDeploymentTargetSelector());
+        assertEquals("team-alpha", created.getSpec().getDeploymentTargetSelector().getWorkspace());
+
+        SchedulingPolicy fetched = client.resources(SchedulingPolicy.class, SchedulingPolicyList.class)
+                .inNamespace(NAMESPACE)
+                .withName("test-schedulingpolicy-crud")
+                .get();
+
+        assertNotNull(fetched, "SchedulingPolicy must be retrievable after creation");
+        assertEquals("team-alpha", fetched.getSpec().getDeploymentTargetSelector().getWorkspace());
+        assertEquals("production",
+                fetched.getSpec().getDeploymentTargetSelector().getLabelSelector().get("tier"));
+        assertNotNull(fetched.getSpec().getClusterTypeSelector());
+        assertEquals("large", fetched.getSpec().getClusterTypeSelector().getLabelSelector().get("size"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Assignment CRD
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates an Assignment resource via the Kubernetes API and reads it back.
+     * Verifies that the {@code clusterType} and {@code deploymentTarget} fields
+     * survive serialization through the API server.
+     */
+    @Test
+    void testAssignmentResourceCrudRoundTrip() {
+        Assignment assignment = buildAssignment("test-assignment-crud",
+                "large-aks", "prod-east-cluster");
+
+        Assignment created = client.resources(Assignment.class, AssignmentList.class)
+                .inNamespace(NAMESPACE)
+                .resource(assignment)
+                .serverSideApply();
+
+        assertNotNull(created.getMetadata().getUid(), "API server must assign a UID");
+        assertEquals("test-assignment-crud", created.getMetadata().getName());
+        assertEquals("large-aks", created.getSpec().getClusterType());
+        assertEquals("prod-east-cluster", created.getSpec().getDeploymentTarget());
+
+        Assignment fetched = client.resources(Assignment.class, AssignmentList.class)
+                .inNamespace(NAMESPACE)
+                .withName("test-assignment-crud")
+                .get();
+
+        assertNotNull(fetched, "Assignment must be retrievable after creation");
+        assertEquals("large-aks", fetched.getSpec().getClusterType());
+        assertEquals("prod-east-cluster", fetched.getSpec().getDeploymentTarget());
+    }
+
+    // -------------------------------------------------------------------------
+    // AssignmentPackage CRD
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates an AssignmentPackage resource via the Kubernetes API and reads it back.
+     * Verifies that the manifest lists and content types survive serialization.
+     */
+    @Test
+    void testAssignmentPackageResourceCrudRoundTrip() {
+        AssignmentPackage pkg = buildAssignmentPackage("test-assignmentpackage-crud",
+                List.of("apiVersion: v1\nkind: Kustomization"), ContentType.YAML,
+                List.of("apiVersion: v1\nkind: Namespace"),     ContentType.YAML,
+                List.of(),                                       ContentType.YAML);
+
+        AssignmentPackage created = client.resources(AssignmentPackage.class, AssignmentPackageList.class)
+                .inNamespace(NAMESPACE)
+                .resource(pkg)
+                .serverSideApply();
+
+        assertNotNull(created.getMetadata().getUid(), "API server must assign a UID");
+        assertEquals("test-assignmentpackage-crud", created.getMetadata().getName());
+        assertEquals(1, created.getSpec().getReconcilerManifests().size());
+        assertEquals(ContentType.YAML, created.getSpec().getReconcilerManifestsContentType());
+
+        AssignmentPackage fetched = client.resources(AssignmentPackage.class, AssignmentPackageList.class)
+                .inNamespace(NAMESPACE)
+                .withName("test-assignmentpackage-crud")
+                .get();
+
+        assertNotNull(fetched, "AssignmentPackage must be retrievable after creation");
+        assertEquals(1, fetched.getSpec().getReconcilerManifests().size());
+        assertEquals(ContentType.YAML, fetched.getSpec().getNamespaceManifestsContentType());
+    }
+
+    // -------------------------------------------------------------------------
+    // GitOpsRepo CRD
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates a GitOpsRepo resource via the Kubernetes API and reads it back.
+     * Verifies that the repo URL, branch, and path fields survive serialization.
+     */
+    @Test
+    void testGitOpsRepoResourceCrudRoundTrip() {
+        GitOpsRepo gitOpsRepo = buildGitOpsRepo("test-gitopsrepo-crud",
+                "https://github.com/org/gitops-manifests", "main", "./clusters");
+
+        GitOpsRepo created = client.resources(GitOpsRepo.class, GitOpsRepoList.class)
+                .inNamespace(NAMESPACE)
+                .resource(gitOpsRepo)
+                .serverSideApply();
+
+        assertNotNull(created.getMetadata().getUid(), "API server must assign a UID");
+        assertEquals("test-gitopsrepo-crud", created.getMetadata().getName());
+        assertEquals("https://github.com/org/gitops-manifests", created.getSpec().getRepo());
+        assertEquals("main", created.getSpec().getBranch());
+        assertEquals("./clusters", created.getSpec().getPath());
+
+        GitOpsRepo fetched = client.resources(GitOpsRepo.class, GitOpsRepoList.class)
+                .inNamespace(NAMESPACE)
+                .withName("test-gitopsrepo-crud")
+                .get();
+
+        assertNotNull(fetched, "GitOpsRepo must be retrievable after creation");
+        assertEquals("https://github.com/org/gitops-manifests", fetched.getSpec().getRepo());
+        assertEquals("main", fetched.getSpec().getBranch());
+        assertEquals("./clusters", fetched.getSpec().getPath());
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
@@ -519,6 +845,175 @@ class OperatorIntegrationIT {
         return br;
     }
 
+    private Environment buildEnvironment(String name, String repo, String branch, String path) {
+        Environment env = new Environment();
+        env.setMetadata(new ObjectMetaBuilder()
+                .withName(name)
+                .withNamespace(NAMESPACE)
+                .build());
+
+        RepositoryReference ref = new RepositoryReference();
+        ref.setRepo(repo);
+        ref.setBranch(branch);
+        ref.setPath(path);
+
+        EnvironmentSpec spec = new EnvironmentSpec();
+        spec.setControlPlane(ref);
+        env.setSpec(spec);
+
+        return env;
+    }
+
+    private WorkloadRegistration buildWorkloadRegistration(String name, String repo, String branch,
+                                                           String path, String workspace) {
+        WorkloadRegistration wreg = new WorkloadRegistration();
+        wreg.setMetadata(new ObjectMetaBuilder()
+                .withName(name)
+                .withNamespace(NAMESPACE)
+                .build());
+
+        RepositoryReference ref = new RepositoryReference();
+        ref.setRepo(repo);
+        ref.setBranch(branch);
+        ref.setPath(path);
+
+        WorkloadRegistrationSpec spec = new WorkloadRegistrationSpec();
+        spec.setWorkload(ref);
+        spec.setWorkspace(workspace);
+        wreg.setSpec(spec);
+
+        return wreg;
+    }
+
+    private Workload buildWorkload(String name, String targetName,
+                                   String repo, String branch, String path) {
+        Workload wl = new Workload();
+        wl.setMetadata(new ObjectMetaBuilder()
+                .withName(name)
+                .withNamespace(NAMESPACE)
+                .build());
+
+        RepositoryReference ref = new RepositoryReference();
+        ref.setRepo(repo);
+        ref.setBranch(branch);
+        ref.setPath(path);
+
+        WorkloadTarget target = new WorkloadTarget();
+        target.setName(targetName);
+        target.setManifests(ref);
+
+        WorkloadSpec spec = new WorkloadSpec();
+        spec.setDeploymentTargets(List.of(target));
+        wl.setSpec(spec);
+
+        return wl;
+    }
+
+    private DeploymentTarget buildDeploymentTarget(String name, String targetName, String environment,
+                                                   Map<String, String> labels,
+                                                   String repo, String branch, String path) {
+        DeploymentTarget dt = new DeploymentTarget();
+        dt.setMetadata(new ObjectMetaBuilder()
+                .withName(name)
+                .withNamespace(NAMESPACE)
+                .build());
+
+        RepositoryReference ref = new RepositoryReference();
+        ref.setRepo(repo);
+        ref.setBranch(branch);
+        ref.setPath(path);
+
+        DeploymentTargetSpec spec = new DeploymentTargetSpec();
+        spec.setName(targetName);
+        spec.setEnvironment(environment);
+        spec.setLabels(labels);
+        spec.setManifests(ref);
+        dt.setSpec(spec);
+
+        return dt;
+    }
+
+    private SchedulingPolicy buildSchedulingPolicy(String name,
+                                                   String dtWorkspace, Map<String, String> dtLabelSelector,
+                                                   String ctWorkspace, Map<String, String> ctLabelSelector) {
+        SchedulingPolicy sp = new SchedulingPolicy();
+        sp.setMetadata(new ObjectMetaBuilder()
+                .withName(name)
+                .withNamespace(NAMESPACE)
+                .build());
+
+        Selector dtSelector = new Selector();
+        dtSelector.setWorkspace(dtWorkspace);
+        dtSelector.setLabelSelector(dtLabelSelector);
+
+        Selector ctSelector = new Selector();
+        ctSelector.setWorkspace(ctWorkspace);
+        ctSelector.setLabelSelector(ctLabelSelector);
+
+        SchedulingPolicySpec spec = new SchedulingPolicySpec();
+        spec.setDeploymentTargetSelector(dtSelector);
+        spec.setClusterTypeSelector(ctSelector);
+        sp.setSpec(spec);
+
+        return sp;
+    }
+
+    private Assignment buildAssignment(String name, String clusterType, String deploymentTarget) {
+        Assignment asgn = new Assignment();
+        asgn.setMetadata(new ObjectMetaBuilder()
+                .withName(name)
+                .withNamespace(NAMESPACE)
+                .build());
+
+        AssignmentSpec spec = new AssignmentSpec();
+        spec.setClusterType(clusterType);
+        spec.setDeploymentTarget(deploymentTarget);
+        asgn.setSpec(spec);
+
+        return asgn;
+    }
+
+    private AssignmentPackage buildAssignmentPackage(String name,
+                                                     List<String> reconcilerManifests,
+                                                     ContentType reconcilerContentType,
+                                                     List<String> namespaceManifests,
+                                                     ContentType namespaceContentType,
+                                                     List<String> configManifests,
+                                                     ContentType configContentType) {
+        AssignmentPackage pkg = new AssignmentPackage();
+        pkg.setMetadata(new ObjectMetaBuilder()
+                .withName(name)
+                .withNamespace(NAMESPACE)
+                .build());
+
+        AssignmentPackageSpec spec = new AssignmentPackageSpec();
+        spec.setReconcilerManifests(reconcilerManifests);
+        spec.setReconcilerManifestsContentType(reconcilerContentType);
+        spec.setNamespaceManifests(namespaceManifests);
+        spec.setNamespaceManifestsContentType(namespaceContentType);
+        spec.setConfigManifests(configManifests);
+        spec.setConfigManifestsContentType(configContentType);
+        pkg.setSpec(spec);
+
+        return pkg;
+    }
+
+    private GitOpsRepo buildGitOpsRepo(String name, String repo, String branch, String path) {
+        GitOpsRepo gor = new GitOpsRepo();
+        gor.setMetadata(new ObjectMetaBuilder()
+                .withName(name)
+                .withNamespace(NAMESPACE)
+                .build());
+
+        GitOpsRepoSpec spec = new GitOpsRepoSpec();
+        spec.setRepo(repo);
+        spec.setBranch(branch);
+        spec.setPath(path);
+        gor.setSpec(spec);
+
+        return gor;
+    }
+
     private void deleteQuietly(String resourceName) {
         try {
             client.resources(Template.class, TemplateList.class)
@@ -534,6 +1029,38 @@ class OperatorIntegrationIT {
         } catch (Exception ignored) {}
         try {
             client.resources(BaseRepo.class, BaseRepoList.class)
+                    .inNamespace(NAMESPACE).withName(resourceName).delete();
+        } catch (Exception ignored) {}
+        try {
+            client.resources(Environment.class, EnvironmentList.class)
+                    .inNamespace(NAMESPACE).withName(resourceName).delete();
+        } catch (Exception ignored) {}
+        try {
+            client.resources(WorkloadRegistration.class, WorkloadRegistrationList.class)
+                    .inNamespace(NAMESPACE).withName(resourceName).delete();
+        } catch (Exception ignored) {}
+        try {
+            client.resources(Workload.class, WorkloadList.class)
+                    .inNamespace(NAMESPACE).withName(resourceName).delete();
+        } catch (Exception ignored) {}
+        try {
+            client.resources(DeploymentTarget.class, DeploymentTargetList.class)
+                    .inNamespace(NAMESPACE).withName(resourceName).delete();
+        } catch (Exception ignored) {}
+        try {
+            client.resources(SchedulingPolicy.class, SchedulingPolicyList.class)
+                    .inNamespace(NAMESPACE).withName(resourceName).delete();
+        } catch (Exception ignored) {}
+        try {
+            client.resources(Assignment.class, AssignmentList.class)
+                    .inNamespace(NAMESPACE).withName(resourceName).delete();
+        } catch (Exception ignored) {}
+        try {
+            client.resources(AssignmentPackage.class, AssignmentPackageList.class)
+                    .inNamespace(NAMESPACE).withName(resourceName).delete();
+        } catch (Exception ignored) {}
+        try {
+            client.resources(GitOpsRepo.class, GitOpsRepoList.class)
                     .inNamespace(NAMESPACE).withName(resourceName).delete();
         } catch (Exception ignored) {}
     }
