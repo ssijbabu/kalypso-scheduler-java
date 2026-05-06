@@ -714,7 +714,7 @@ Branch: "main"
 - [x] Day 3: Environment, WorkloadRegistration, Workload CRDs
 - [x] Day 4: DeploymentTarget, SchedulingPolicy CRDs
 - [x] Day 5: Assignment, AssignmentPackage, GitOpsRepo CRDs
-- [ ] Day 6: FluxService functional with KubernetesClient
+- [x] Day 6: FluxService functional with KubernetesClient
 - [ ] Day 7: Template processing, GitHub integration working
 - [ ] Day 8: BaseRepoReconciler, EnvironmentReconciler operational
 - [ ] Day 9: WorkloadRegistrationReconciler, WorkloadReconciler operational

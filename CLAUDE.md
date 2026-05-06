@@ -177,6 +177,19 @@ These are concrete mistakes made during this migration — non-obvious failures 
   **Why**: Without a readiness probe, Kubernetes marks the Pod ready as soon as the container process starts — before the JVM has written any log lines.
   **Correct**: Poll with a loop (`pollForLog(podName, expectedLine, timeoutSeconds)`) that retries once per second until the expected line appears or a timeout elapses.
 
+### Flux Integration (FluxService / GenericKubernetesResource)
+- **Wrong**: Extending `CustomResource<Spec, Status>` for third-party CRD model classes (e.g. Flux `GitRepository`, `Kustomization`).
+  **Why**: The `crd-generator-maven-plugin` scans all `CustomResource` subclasses and generates CRD YAMLs for them. Those YAMLs are applied to the cluster during `pre-integration-test` (`kubectl apply -f META-INF/fabric8/`), potentially overwriting the real Flux CRD definitions with an incomplete schema and breaking Flux.
+  **Correct**: Model Flux resources as plain POJOs (Jackson annotations only). Use `GenericKubernetesResource` + `ResourceDefinitionContext` in the service to submit requests to the already-installed Flux CRDs.
+
+- **Wrong**: Using `v1beta2` for Flux `GitRepository` and `Kustomization` resources, or guarding a Flux IT test only on CRD *existence*.
+  **Why**: Flux 2.0+ promotes both resource types to `v1` and stops serving `v1beta2`. The CRD still exists, so an existence-only guard passes — but the PATCH call returns `404 Not Found` because the version endpoint is gone.
+  **Correct**: Use `v1` as the API version. Guard the IT test by checking the specific version is served: `crd.getSpec().getVersions().stream().anyMatch(v -> "v1".equals(v.getName()) && Boolean.TRUE.equals(v.getServed()))`.
+
+- **Wrong**: Using `@Mock(answer = Answers.RETURNS_DEEP_STUBS) KubernetesClient client` to mock `KubernetesClient` on Java 16+.
+  **Why**: Mockito's inline mocker must instrument every class in the interface hierarchy, including `java.io.Closeable` and `java.lang.AutoCloseable` from `java.base`. On Java 16+ (and definitely Java 25) the module system blocks this, causing every test method in the class to fail with `MockitoException: Could not modify all classes`.
+  **Correct**: Make the non-trivial logic (resource building) package-private and test it directly without a client mock. Reserve client-interaction verification for integration tests.
+
 ### General
 - **Wrong**: Saving a project-level rule (e.g. "integration tests must always run") to personal Claude memory.
   **Why**: Personal memory is for user preferences that span projects; project rules belong in `CLAUDE.md` where they are versioned and visible to all contributors.

@@ -47,7 +47,9 @@ import io.kalypso.scheduler.api.v1alpha1.spec.TemplateType;
 import io.kalypso.scheduler.api.v1alpha1.spec.WorkloadRegistrationSpec;
 import io.kalypso.scheduler.api.v1alpha1.spec.WorkloadSpec;
 import io.kalypso.scheduler.api.v1alpha1.spec.WorkloadTarget;
+import io.kalypso.scheduler.services.FluxService;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -111,6 +113,7 @@ class OperatorIntegrationIT {
         deleteQuietly("test-assignment-crud");
         deleteQuietly("test-assignmentpackage-crud");
         deleteQuietly("test-gitopsrepo-crud");
+        deleteFluxQuietly("test-flux-service");
         if (client != null) {
             client.close();
         }
@@ -1012,6 +1015,110 @@ class OperatorIntegrationIT {
         gor.setSpec(spec);
 
         return gor;
+    }
+
+    // -------------------------------------------------------------------------
+    // FluxService
+    // -------------------------------------------------------------------------
+
+    /**
+     * Verifies that {@link FluxService} can create and delete a Flux
+     * {@code GitRepository} + {@code Kustomization} pair against a live cluster.
+     *
+     * <p>This test is skipped automatically when the Flux source CRD
+     * ({@code gitrepositories.source.toolkit.fluxcd.io}) is not installed,
+     * so the test suite does not fail on clusters without Flux.
+     */
+    @Test
+    void testFluxServiceCreateAndDeleteReferenceResources() {
+        var crd = client.apiextensions().v1().customResourceDefinitions()
+                .withName("gitrepositories.source.toolkit.fluxcd.io")
+                .get();
+        boolean v1Served = crd != null && crd.getSpec().getVersions().stream()
+                .anyMatch(v -> "v1".equals(v.getName()) && Boolean.TRUE.equals(v.getServed()));
+        Assumptions.assumeTrue(v1Served,
+                "Skipping FluxService IT: Flux GitRepository v1 not served on cluster");
+
+        // Flux resources always live in flux-system; targetNamespace is the CRD's namespace
+        String fluxNamespace = FluxService.DEFAULT_FLUX_NAMESPACE;
+        FluxService fluxService = new FluxService(client);
+        String testName = "test-flux-service";
+
+        fluxService.createFluxReferenceResources(
+                testName, fluxNamespace, NAMESPACE,
+                "https://github.com/org/test-repo", "main", "./", null);
+
+        var gitRepo = client.genericKubernetesResources(
+                        new io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext.Builder()
+                                .withGroup("source.toolkit.fluxcd.io")
+                                .withVersion("v1")
+                                .withKind("GitRepository")
+                                .withNamespaced(true)
+                                .build())
+                .inNamespace(fluxNamespace)
+                .withName(testName)
+                .get();
+        assertNotNull(gitRepo, "GitRepository must exist in flux-system after createFluxReferenceResources");
+        assertEquals(testName, gitRepo.getMetadata().getName());
+
+        var kustomization = client.genericKubernetesResources(
+                        new io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext.Builder()
+                                .withGroup("kustomize.toolkit.fluxcd.io")
+                                .withVersion("v1")
+                                .withKind("Kustomization")
+                                .withNamespaced(true)
+                                .build())
+                .inNamespace(fluxNamespace)
+                .withName(testName)
+                .get();
+        assertNotNull(kustomization, "Kustomization must exist in flux-system after createFluxReferenceResources");
+        assertEquals(testName, kustomization.getMetadata().getName());
+
+        fluxService.deleteFluxReferenceResources(testName, fluxNamespace);
+
+        assertNull(client.genericKubernetesResources(
+                        new io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext.Builder()
+                                .withGroup("source.toolkit.fluxcd.io")
+                                .withVersion("v1")
+                                .withKind("GitRepository")
+                                .withNamespaced(true)
+                                .build())
+                .inNamespace(fluxNamespace)
+                .withName(testName)
+                .get(),
+                "GitRepository must be absent after deleteFluxReferenceResources");
+    }
+
+    private void deleteFluxQuietly(String name) {
+        // Only attempt deletion if Flux v1beta2 is available; otherwise the API call itself throws.
+        var crd = client.apiextensions().v1().customResourceDefinitions()
+                .withName("gitrepositories.source.toolkit.fluxcd.io").get();
+        boolean v1Served = crd != null && crd.getSpec().getVersions().stream()
+                .anyMatch(v -> "v1".equals(v.getName()) && Boolean.TRUE.equals(v.getServed()));
+        if (!v1Served) {
+            return;
+        }
+        String fluxNamespace = FluxService.DEFAULT_FLUX_NAMESPACE;
+        try {
+            client.genericKubernetesResources(
+                            new io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext.Builder()
+                                    .withGroup("source.toolkit.fluxcd.io")
+                                    .withVersion("v1")
+                                    .withKind("GitRepository")
+                                    .withNamespaced(true)
+                                    .build())
+                    .inNamespace(fluxNamespace).withName(name).delete();
+        } catch (Exception ignored) {}
+        try {
+            client.genericKubernetesResources(
+                            new io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext.Builder()
+                                    .withGroup("kustomize.toolkit.fluxcd.io")
+                                    .withVersion("v1")
+                                    .withKind("Kustomization")
+                                    .withNamespaced(true)
+                                    .build())
+                    .inNamespace(fluxNamespace).withName(name).delete();
+        } catch (Exception ignored) {}
     }
 
     private void deleteQuietly(String resourceName) {
