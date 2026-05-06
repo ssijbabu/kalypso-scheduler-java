@@ -126,6 +126,62 @@ Update `MIGRATION_PLAN.md` checklist when completing each day's tasks. Branch na
 
 After completing each migration day, create a `DAY<N>_SUMMARY.md` file following the same format as `BOOTSTRAP_DAY0_SUMMARY.md` and `DAY1_SUMMARY.md`: completed tasks, key design decisions, issues encountered and resolved, project structure changes, build verification results, and what's next.
 
+## Known Mistakes to Avoid
+
+These are concrete mistakes made during this migration — non-obvious failures specific to this project's library versions and patterns.
+
+### Docker / Image
+- **Wrong**: `FROM eclipse-temurin:17-jre-alpine` in Dockerfile.
+  **Why**: Alpine image has no ARM64 manifest; fails on Apple Silicon.
+  **Correct**: Use `FROM eclipse-temurin:17-jre` (Debian-based, multi-arch).
+
+### java-operator-sdk 5.3.2
+- **Wrong**: Calling `operator.installShutdownHook()` with no arguments.
+  **Why**: JOSDK 5.3.2 requires a `Duration` argument; zero-arg overload doesn't exist in this version.
+  **Correct**: `operator.installShutdownHook(Duration.ofSeconds(30))`.
+
+- **Wrong**: Calling `operator.start()` when `reconcilers()` returns an empty list.
+  **Why**: JOSDK 5.3.2 throws `OperatorException: No Controller exists. Exiting!` with no registered controllers.
+  **Correct**: Guard with `if (reconcilers.isEmpty()) { /* passive mode — block on Thread.join() */ }` and skip `operator.start()` entirely.
+
+### Maven Build
+- **Wrong**: Running `mvn verify` (without `clean`) after editing source files.
+  **Why**: Maven's incremental compiler caches stale `.class` files; old bytecode ends up in the shaded JAR. CRD generator also only runs in `process-classes` phase — not triggered by `compile` alone.
+  **Correct**: Always use `mvn clean verify` to force full recompilation and CRD regeneration.
+
+### Logging
+- **Wrong**: Relying on `src/main/resources/logback.xml` for logging configuration.
+  **Why**: The project uses `log4j-slf4j2-impl` + `log4j-core` as the SLF4J backend; Log4j2 silently ignores `logback.xml`. Default Log4j2 level is ERROR, so all `logger.info()` calls are discarded.
+  **Correct**: Configure logging in `src/main/resources/log4j2.xml`.
+
+### fabric8 Kubernetes Client 6.x
+- **Wrong**: Using `client.resources(...).resource(...).createOrReplace()` in tests or production code.
+  **Why**: `createOrReplace()` is deprecated in fabric8 6.x.
+  **Correct**: Use `serverSideApply()` instead.
+
+- **Wrong**: Using `CustomResourceList<T>` as the base class for CRD list types.
+  **Why**: `CustomResourceList` is deprecated in fabric8 6.x.
+  **Correct**: Use `DefaultKubernetesResourceList<T>` from `io.fabric8.kubernetes.api.model`.
+
+- **Wrong**: `assertNotNull(deployment.getStatus().getReadyReplicas())` in tests.
+  **Why**: Kubernetes omits `readyReplicas` from the API response when the value is 0; fabric8 returns `null`.
+  **Correct**: `int ready = status.getReadyReplicas() != null ? status.getReadyReplicas() : 0;`
+
+### CRD Schema Generation (fabric8 crd-generator-maven-plugin 7.6.1)
+- **Wrong**: Using `Map<String, Object>`, `JsonNode`, or plain `Object` for a free-form spec field (e.g. a JSON Schema body) without an annotation.
+  **Why**: The CRD generator produces `additionalProperties: {type: "object"}` for all three, which causes the Kubernetes API server to reject non-object values (e.g. the string `"object"` in `{"type": "object"}`) when using server-side apply.
+  **Correct**: Annotate the field with `@io.fabric8.crd.generator.annotation.PreserveUnknownFields` (requires `io.fabric8:crd-generator-api:7.6.1` as a `provided`-scope dependency). This generates `x-kubernetes-preserve-unknown-fields: true` in the CRD.
+
+### Integration Tests
+- **Wrong**: Fetching pod logs with a single `client.pods().withName(name).getLog()` call immediately after the deployment is ready.
+  **Why**: Without a readiness probe, Kubernetes marks the Pod ready as soon as the container process starts — before the JVM has written any log lines.
+  **Correct**: Poll with a loop (`pollForLog(podName, expectedLine, timeoutSeconds)`) that retries once per second until the expected line appears or a timeout elapses.
+
+### General
+- **Wrong**: Saving a project-level rule (e.g. "integration tests must always run") to personal Claude memory.
+  **Why**: Personal memory is for user preferences that span projects; project rules belong in `CLAUDE.md` where they are versioned and visible to all contributors.
+  **Correct**: Add project-specific rules directly to `CLAUDE.md`.
+
 ## Current Status
 Day 0 (bootstrap) is complete. Only `TemplateCustomResource` and its Spec/Status classes exist under `api/v1alpha/`. All controllers, services, models, and exceptions are planned but not yet implemented. See `MIGRATION_PLAN.md` for the 14-day roadmap.
 
