@@ -124,6 +124,8 @@ Every public class and method requires JavaDoc (purpose, params, return, excepti
 ### Migration Tracking
 Update `MIGRATION_PLAN.md` checklist when completing each day's tasks. Branch names: `day-N-<short-desc>`. PR titles: `[Day N] Feature - brief description`.
 
+After completing each migration day, create a `DAY<N>_SUMMARY.md` file following the same format as `BOOTSTRAP_DAY0_SUMMARY.md` and `DAY1_SUMMARY.md`: completed tasks, key design decisions, issues encountered and resolved, project structure changes, build verification results, and what's next.
+
 ## Current Status
 Day 0 (bootstrap) is complete. Only `TemplateCustomResource` and its Spec/Status classes exist under `api/v1alpha/`. All controllers, services, models, and exceptions are planned but not yet implemented. See `MIGRATION_PLAN.md` for the 14-day roadmap.
 

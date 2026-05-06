@@ -1,14 +1,21 @@
 package io.kalypso.scheduler.it;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
+import io.kalypso.scheduler.api.v1alpha1.BaseRepo;
+import io.kalypso.scheduler.api.v1alpha1.BaseRepoList;
 import io.kalypso.scheduler.api.v1alpha1.ClusterType;
 import io.kalypso.scheduler.api.v1alpha1.ClusterTypeList;
+import io.kalypso.scheduler.api.v1alpha1.ConfigSchema;
+import io.kalypso.scheduler.api.v1alpha1.ConfigSchemaList;
 import io.kalypso.scheduler.api.v1alpha1.Template;
 import io.kalypso.scheduler.api.v1alpha1.TemplateList;
+import io.kalypso.scheduler.api.v1alpha1.spec.BaseRepoSpec;
 import io.kalypso.scheduler.api.v1alpha1.spec.ClusterConfigType;
 import io.kalypso.scheduler.api.v1alpha1.spec.ClusterTypeSpec;
+import io.kalypso.scheduler.api.v1alpha1.spec.ConfigSchemaSpec;
 import io.kalypso.scheduler.api.v1alpha1.spec.ContentType;
 import io.kalypso.scheduler.api.v1alpha1.spec.TemplateManifest;
 import io.kalypso.scheduler.api.v1alpha1.spec.TemplateSpec;
@@ -35,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *   <li>Waiting for the Deployment to reach the Ready state</li>
  * </ol>
  *
- * <p>Skip integration tests with: {@code mvn verify -DskipITs}
+ * <p>Integration tests are mandatory and must never be skipped with {@code -DskipITs}.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class OperatorIntegrationIT {
@@ -65,6 +72,9 @@ class OperatorIntegrationIT {
         deleteQuietly("test-template-crud");
         deleteQuietly("test-template-roundtrip");
         deleteQuietly("test-clustertype-crud");
+        deleteQuietly("test-configschema-crud");
+        deleteQuietly("test-baserepo-crud");
+        deleteQuietly("test-baserepo-nocommit");
         if (client != null) {
             client.close();
         }
@@ -272,7 +282,6 @@ class OperatorIntegrationIT {
         assertEquals("my-namespace-template", created.getSpec().getNamespaceService());
         assertEquals(ClusterConfigType.CONFIGMAP, created.getSpec().getConfigType());
 
-        // Read back
         ClusterType fetched = client.resources(ClusterType.class, ClusterTypeList.class)
                 .inNamespace(NAMESPACE)
                 .withName("test-clustertype-crud")
@@ -290,7 +299,6 @@ class OperatorIntegrationIT {
      */
     @Test
     void testClusterTypeWithEnvfileConfigTypeRoundTrip() {
-        // Reuse the crud resource by updating configType to ENVFILE
         ClusterType clusterType = buildClusterType("test-clustertype-crud",
                 "edge-reconciler", null, ClusterConfigType.ENVFILE);
 
@@ -308,6 +316,131 @@ class OperatorIntegrationIT {
         assertEquals(ClusterConfigType.ENVFILE, fetched.getSpec().getConfigType());
         assertNull(fetched.getSpec().getNamespaceService(),
                 "namespaceService was not set and should remain null");
+    }
+
+    // -------------------------------------------------------------------------
+    // ConfigSchema CRD
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates a ConfigSchema resource via the Kubernetes API and reads it back.
+     * Verifies that the nested JsonNode schema survives serialization through the API server.
+     */
+    @Test
+    void testConfigSchemaResourceCrudRoundTrip() throws Exception {
+        String schemaJson = "{\"type\":\"object\",\"properties\":{\"REGION\":{\"type\":\"string\"},\"DB_URL\":{\"type\":\"string\"}}}";
+        Object schemaObj = new ObjectMapper().readValue(schemaJson, Object.class);
+
+        ConfigSchema configSchema = buildConfigSchema("test-configschema-crud", "large", schemaObj);
+
+        ConfigSchema created = client.resources(ConfigSchema.class, ConfigSchemaList.class)
+                .inNamespace(NAMESPACE)
+                .resource(configSchema)
+                .serverSideApply();
+
+        assertNotNull(created.getMetadata().getUid(), "API server must assign a UID");
+        assertEquals("test-configschema-crud", created.getMetadata().getName());
+        assertEquals("large", created.getSpec().getClusterType());
+        assertNotNull(created.getSpec().getSchema(), "schema node must be present");
+
+        ConfigSchema fetched = client.resources(ConfigSchema.class, ConfigSchemaList.class)
+                .inNamespace(NAMESPACE)
+                .withName("test-configschema-crud")
+                .get();
+
+        assertNotNull(fetched, "ConfigSchema must be retrievable after creation");
+        assertEquals("large", fetched.getSpec().getClusterType());
+        assertNotNull(fetched.getSpec().getSchema());
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> schemaMap = (java.util.Map<String, Object>) fetched.getSpec().getSchema();
+        assertEquals("object", schemaMap.get("type"),
+                "schema type field must survive the round-trip");
+    }
+
+    /**
+     * Verifies that a ConfigSchema with only the clusterType field (no schema body)
+     * is accepted by the API server and null schema is preserved correctly.
+     */
+    @Test
+    void testConfigSchemaWithNoSchemaBodyRoundTrip() {
+        ConfigSchema configSchema = buildConfigSchema("test-configschema-crud", "edge", null);
+
+        client.resources(ConfigSchema.class, ConfigSchemaList.class)
+                .inNamespace(NAMESPACE)
+                .resource(configSchema)
+                .serverSideApply();
+
+        ConfigSchema fetched = client.resources(ConfigSchema.class, ConfigSchemaList.class)
+                .inNamespace(NAMESPACE)
+                .withName("test-configschema-crud")
+                .get();
+
+        assertNotNull(fetched);
+        assertEquals("edge", fetched.getSpec().getClusterType());
+        assertNull(fetched.getSpec().getSchema(), "absent schema must remain null");
+    }
+
+    // -------------------------------------------------------------------------
+    // BaseRepo CRD
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates a BaseRepo resource with all fields (including optional commit) and reads it back.
+     * Verifies that all Git coordinates survive serialization through the API server.
+     */
+    @Test
+    void testBaseRepoResourceCrudRoundTrip() {
+        BaseRepo baseRepo = buildBaseRepo("test-baserepo-crud",
+                "https://github.com/org/control-plane", "main", "./environments", "a1b2c3d4");
+
+        BaseRepo created = client.resources(BaseRepo.class, BaseRepoList.class)
+                .inNamespace(NAMESPACE)
+                .resource(baseRepo)
+                .serverSideApply();
+
+        assertNotNull(created.getMetadata().getUid(), "API server must assign a UID");
+        assertEquals("test-baserepo-crud", created.getMetadata().getName());
+        assertEquals("https://github.com/org/control-plane", created.getSpec().getRepo());
+        assertEquals("main",            created.getSpec().getBranch());
+        assertEquals("./environments",  created.getSpec().getPath());
+        assertEquals("a1b2c3d4",        created.getSpec().getCommit());
+
+        BaseRepo fetched = client.resources(BaseRepo.class, BaseRepoList.class)
+                .inNamespace(NAMESPACE)
+                .withName("test-baserepo-crud")
+                .get();
+
+        assertNotNull(fetched, "BaseRepo must be retrievable after creation");
+        assertEquals("https://github.com/org/control-plane", fetched.getSpec().getRepo());
+        assertEquals("main",           fetched.getSpec().getBranch());
+        assertEquals("./environments", fetched.getSpec().getPath());
+        assertEquals("a1b2c3d4",       fetched.getSpec().getCommit());
+    }
+
+    /**
+     * Verifies that a BaseRepo without the optional {@code commit} field is accepted by
+     * the API server and the field remains absent (null) on read-back.
+     */
+    @Test
+    void testBaseRepoWithoutCommitRoundTrip() {
+        BaseRepo baseRepo = buildBaseRepo("test-baserepo-nocommit",
+                "https://github.com/org/base", "release/v2", "./base", null);
+
+        client.resources(BaseRepo.class, BaseRepoList.class)
+                .inNamespace(NAMESPACE)
+                .resource(baseRepo)
+                .serverSideApply();
+
+        BaseRepo fetched = client.resources(BaseRepo.class, BaseRepoList.class)
+                .inNamespace(NAMESPACE)
+                .withName("test-baserepo-nocommit")
+                .get();
+
+        assertNotNull(fetched);
+        assertEquals("https://github.com/org/base", fetched.getSpec().getRepo());
+        assertEquals("release/v2", fetched.getSpec().getBranch());
+        assertEquals("./base",     fetched.getSpec().getPath());
+        assertNull(fetched.getSpec().getCommit(), "commit was not set and must remain null");
     }
 
     // -------------------------------------------------------------------------
@@ -354,14 +487,54 @@ class OperatorIntegrationIT {
         return ct;
     }
 
-    private void deleteQuietly(String templateName) {
+    private ConfigSchema buildConfigSchema(String name, String clusterType, Object schema) {
+        ConfigSchema cs = new ConfigSchema();
+        cs.setMetadata(new ObjectMetaBuilder()
+                .withName(name)
+                .withNamespace(NAMESPACE)
+                .build());
+
+        ConfigSchemaSpec spec = new ConfigSchemaSpec();
+        spec.setClusterType(clusterType);
+        spec.setSchema(schema);
+        cs.setSpec(spec);
+
+        return cs;
+    }
+
+    private BaseRepo buildBaseRepo(String name, String repo, String branch, String path, String commit) {
+        BaseRepo br = new BaseRepo();
+        br.setMetadata(new ObjectMetaBuilder()
+                .withName(name)
+                .withNamespace(NAMESPACE)
+                .build());
+
+        BaseRepoSpec spec = new BaseRepoSpec();
+        spec.setRepo(repo);
+        spec.setBranch(branch);
+        spec.setPath(path);
+        spec.setCommit(commit);
+        br.setSpec(spec);
+
+        return br;
+    }
+
+    private void deleteQuietly(String resourceName) {
         try {
             client.resources(Template.class, TemplateList.class)
-                    .inNamespace(NAMESPACE).withName(templateName).delete();
+                    .inNamespace(NAMESPACE).withName(resourceName).delete();
         } catch (Exception ignored) {}
         try {
             client.resources(ClusterType.class, ClusterTypeList.class)
-                    .inNamespace(NAMESPACE).withName(templateName).delete();
+                    .inNamespace(NAMESPACE).withName(resourceName).delete();
+        } catch (Exception ignored) {}
+        try {
+            client.resources(ConfigSchema.class, ConfigSchemaList.class)
+                    .inNamespace(NAMESPACE).withName(resourceName).delete();
+        } catch (Exception ignored) {}
+        try {
+            client.resources(BaseRepo.class, BaseRepoList.class)
+                    .inNamespace(NAMESPACE).withName(resourceName).delete();
         } catch (Exception ignored) {}
     }
 }

@@ -124,6 +124,14 @@
             <version>${log4j.version}</version>
         </dependency>
 
+        <!-- CRD generator annotations (compile-time only — excluded from shaded jar) -->
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>crd-generator-api</artifactId>
+            <version>${fabric8-client.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- Testing -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>

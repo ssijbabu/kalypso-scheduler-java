@@ -163,6 +163,12 @@
       </exclusions>
     </dependency>
     <dependency>
+      <groupId>io.fabric8</groupId>
+      <artifactId>crd-generator-api</artifactId>
+      <version>7.6.1</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-api</artifactId>
       <version>5.10.1</version>
@@ -204,10 +210,6 @@
       <version>5.11.0</version>
       <scope>test</scope>
       <exclusions>
-        <exclusion>
-          <artifactId>byte-buddy</artifactId>
-          <groupId>net.bytebuddy</groupId>
-        </exclusion>
         <exclusion>
           <artifactId>byte-buddy-agent</artifactId>
           <groupId>net.bytebuddy</groupId>
