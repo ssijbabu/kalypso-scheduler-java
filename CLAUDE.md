@@ -190,13 +190,26 @@ These are concrete mistakes made during this migration — non-obvious failures 
   **Why**: Mockito's inline mocker must instrument every class in the interface hierarchy, including `java.io.Closeable` and `java.lang.AutoCloseable` from `java.base`. On Java 16+ (and definitely Java 25) the module system blocks this, causing every test method in the class to fail with `MockitoException: Could not modify all classes`.
   **Correct**: Make the non-trivial logic (resource building) package-private and test it directly without a client mock. Reserve client-interaction verification for integration tests.
 
+### Freemarker 2.3.32 (TemplateProcessingService)
+- **Wrong**: Using `DeepUnwrap.unwrap(model)` to extract the Java object from a Freemarker method argument.
+  **Why**: `DeepUnwrap.unwrap()` only handles `AdapterTemplateModel` and `WrapperTemplateModel`. When `DefaultObjectWrapper` wraps a `java.util.Map` as `SimpleHash` (non-adapter), `DeepUnwrap.unwrap()` throws `TemplateModelException`. Test shows a failure (wrong output) or error depending on Freemarker's exception handler configuration.
+  **Correct**: Implement a `toJavaObject(TemplateModel)` helper that falls back to iterating `TemplateHashModelEx` manually when adapter-based unwrapping is unavailable.
+
+- **Wrong**: Importing `freemarker.template.WrapperTemplateModel`.
+  **Why**: `WrapperTemplateModel` was removed from Freemarker's public API by 2.3.32. The import causes a compile error.
+  **Correct**: Do not import or reference `WrapperTemplateModel`. Handle adapter models via `AdapterTemplateModel` only.
+
+- **Wrong**: Using `new YAMLMapper()` without `MINIMIZE_QUOTES` when the output is embedded in Kubernetes manifests.
+  **Why**: Jackson YAML 2.15+ (backed by SnakeYAML 2.x) quotes all string values by default (e.g. `region: "eastus"`). This differs from Go's `yaml.Marshal` which does not quote simple strings, breaking manifest templates that expect unquoted values.
+  **Correct**: `yamlMapper.enable(YAMLGenerator.Feature.MINIMIZE_QUOTES)` to reproduce Go's output format.
+
 ### General
 - **Wrong**: Saving a project-level rule (e.g. "integration tests must always run") to personal Claude memory.
   **Why**: Personal memory is for user preferences that span projects; project rules belong in `CLAUDE.md` where they are versioned and visible to all contributors.
   **Correct**: Add project-specific rules directly to `CLAUDE.md`.
 
 ## Current Status
-Day 0 (bootstrap) is complete. Only `TemplateCustomResource` and its Spec/Status classes exist under `api/v1alpha/`. All controllers, services, models, and exceptions are planned but not yet implemented. See `MIGRATION_PLAN.md` for the 14-day roadmap.
+Days 0–7 complete. All 12 CRDs implemented (Days 1–5), FluxService implemented (Day 6), and TemplateProcessingService / GitHubService / ConfigValidationService implemented (Day 7). Controllers (Days 8–14) are not yet implemented. See `MIGRATION_PLAN.md` for the roadmap.
 
 ## Configuration
 All runtime configuration is in `src/main/resources/application.properties`. Logging is configured in `src/main/resources/logback.xml` (io.kalypso=DEBUG, io.javaoperatorsdk=INFO, io.fabric8=WARN). Never add hard-coded values to source — always add a property key.
