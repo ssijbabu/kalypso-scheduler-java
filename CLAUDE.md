@@ -218,13 +218,23 @@ These are concrete mistakes made during this migration — non-obvious failures 
   **Why**: JOSDK 5.x `Cleaner<T>` manages the full finalizer lifecycle automatically: adds before first reconcile, calls `cleanup()` on deletion, removes after `DeleteControl.defaultDelete()` is returned.
   **Correct**: Implement `Cleaner<T>` on the reconciler. JOSDK handles the rest.
 
+### SnakeYAML (AssignmentPackageReconciler)
+- **Wrong**: Using `new Yaml().load(manifest)` and expecting it to throw on valid YAML scalars or plain strings.
+  **Why**: SnakeYAML's `load()` returns `null` for an empty/blank string but does NOT throw — it only throws `YAMLException` for structurally invalid YAML (unclosed brackets, bad indentation). Blank strings must be checked explicitly before calling `load()`.
+  **Correct**: Check `manifest == null || manifest.isBlank()` first, then call `new Yaml().load(manifest)` inside a try/catch for `YAMLException`.
+
+### Reconciler subclass overrides in tests (JVM 25)
+- **Wrong**: Creating an anonymous subclass of a reconciler to override a method, while still passing `null` for the Kubernetes client AND calling methods that eventually reach `super.reconcile()` or `super.cleanup()`.
+  **Why**: The `super` path calls `kubernetesClient.resources(...)` which NPEs when the client is `null`. The override must intercept *before* any client call.
+  **Correct**: Override the specific package-private method that does the Kubernetes work (e.g. `reconcileDeploymentTargets`), not the top-level `reconcile()`. The top-level method does only status management and can run safely with `null` client as long as the Kubernetes-touching method is overridden.
+
 ### General
 - **Wrong**: Saving a project-level rule (e.g. "integration tests must always run") to personal Claude memory.
   **Why**: Personal memory is for user preferences that span projects; project rules belong in `CLAUDE.md` where they are versioned and visible to all contributors.
   **Correct**: Add project-specific rules directly to `CLAUDE.md`.
 
 ## Current Status
-Days 0–8 complete. All 12 CRDs (Days 1–5), FluxService (Day 6), TemplateProcessingService / GitHubService / ConfigValidationService (Day 7), BaseRepoReconciler / EnvironmentReconciler (Day 8). Remaining controllers (Days 9–14) are not yet implemented. See `MIGRATION_PLAN.md` for the roadmap.
+Days 0–13 complete. All 12 CRDs (Days 1–5), FluxService (Day 6), TemplateProcessingService / GitHubService / ConfigValidationService (Day 7), all 8 reconcilers (Days 8–13): BaseRepoReconciler, EnvironmentReconciler, WorkloadRegistrationReconciler, WorkloadReconciler, SchedulingPolicyReconciler, AssignmentReconciler, AssignmentPackageReconciler, GitOpsRepoReconciler. 187 unit tests passing. Only Day 14 (integration tests + end-to-end validation) remains. See `MIGRATION_PLAN.md` for the roadmap.
 
 ## Configuration
 All runtime configuration is in `src/main/resources/application.properties`. Logging is configured in `src/main/resources/logback.xml` (io.kalypso=DEBUG, io.javaoperatorsdk=INFO, io.fabric8=WARN). Never add hard-coded values to source — always add a property key.

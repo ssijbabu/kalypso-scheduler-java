@@ -4,9 +4,18 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.javaoperatorsdk.operator.Operator;
 import io.javaoperatorsdk.operator.api.reconciler.Reconciler;
+import io.kalypso.scheduler.controllers.AssignmentPackageReconciler;
+import io.kalypso.scheduler.controllers.AssignmentReconciler;
 import io.kalypso.scheduler.controllers.BaseRepoReconciler;
 import io.kalypso.scheduler.controllers.EnvironmentReconciler;
+import io.kalypso.scheduler.controllers.GitOpsRepoReconciler;
+import io.kalypso.scheduler.controllers.SchedulingPolicyReconciler;
+import io.kalypso.scheduler.controllers.WorkloadReconciler;
+import io.kalypso.scheduler.controllers.WorkloadRegistrationReconciler;
+import io.kalypso.scheduler.services.ConfigValidationService;
 import io.kalypso.scheduler.services.FluxService;
+import io.kalypso.scheduler.services.GitHubService;
+import io.kalypso.scheduler.services.TemplateProcessingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -75,16 +84,20 @@ public class KalypsoSchedulerOperator {
     private static List<Reconciler<?>> reconcilers() {
         KubernetesClient client = new KubernetesClientBuilder().build();
         FluxService fluxService = new FluxService(client);
+        TemplateProcessingService templateProcessingService = new TemplateProcessingService();
+        ConfigValidationService configValidationService = new ConfigValidationService();
+        GitHubService gitHubService = new GitHubService();
 
         return List.of(
-            new BaseRepoReconciler(fluxService),
-            new EnvironmentReconciler(client, fluxService)
-            // Day 9:  new WorkloadRegistrationReconciler(...)
-            // Day 9:  new WorkloadReconciler(...)
-            // Day 10: new SchedulingPolicyReconciler(...)
-            // Day 11: new AssignmentReconciler(...)
-            // Day 12: new AssignmentPackageReconciler(...)
-            // Day 12: new GitOpsRepoReconciler(...)
+            new BaseRepoReconciler(fluxService),                                         // Day 8
+            new EnvironmentReconciler(client, fluxService),                              // Day 8
+            new WorkloadRegistrationReconciler(fluxService),                             // Day 9
+            new WorkloadReconciler(client),                                              // Day 9
+            new SchedulingPolicyReconciler(client),                                      // Day 10
+            new AssignmentReconciler(client, templateProcessingService,
+                    configValidationService),                                             // Day 11
+            new AssignmentPackageReconciler(),                                           // Day 12
+            new GitOpsRepoReconciler(client, gitHubService)                              // Day 13
         );
     }
 }
