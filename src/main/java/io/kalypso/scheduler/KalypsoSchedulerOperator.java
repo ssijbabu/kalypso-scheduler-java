@@ -1,7 +1,12 @@
 package io.kalypso.scheduler;
 
+import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.javaoperatorsdk.operator.Operator;
 import io.javaoperatorsdk.operator.api.reconciler.Reconciler;
+import io.kalypso.scheduler.controllers.BaseRepoReconciler;
+import io.kalypso.scheduler.controllers.EnvironmentReconciler;
+import io.kalypso.scheduler.services.FluxService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -65,12 +70,15 @@ public class KalypsoSchedulerOperator {
      * <p>Add entries here as each day's controllers are implemented.
      * The operator starts in passive mode when this list is empty.
      *
-     * @return reconcilers to register (empty until Day 8)
+     * @return reconcilers to register
      */
     private static List<Reconciler<?>> reconcilers() {
+        KubernetesClient client = new KubernetesClientBuilder().build();
+        FluxService fluxService = new FluxService(client);
+
         return List.of(
-            // Day 8:  new BaseRepoReconciler(...)
-            // Day 8:  new EnvironmentReconciler(...)
+            new BaseRepoReconciler(fluxService),
+            new EnvironmentReconciler(client, fluxService)
             // Day 9:  new WorkloadRegistrationReconciler(...)
             // Day 9:  new WorkloadReconciler(...)
             // Day 10: new SchedulingPolicyReconciler(...)

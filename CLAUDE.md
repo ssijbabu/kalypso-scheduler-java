@@ -203,13 +203,28 @@ These are concrete mistakes made during this migration — non-obvious failures 
   **Why**: Jackson YAML 2.15+ (backed by SnakeYAML 2.x) quotes all string values by default (e.g. `region: "eastus"`). This differs from Go's `yaml.Marshal` which does not quote simple strings, breaking manifest templates that expect unquoted values.
   **Correct**: `yamlMapper.enable(YAMLGenerator.Feature.MINIMIZE_QUOTES)` to reproduce Go's output format.
 
+### Mockito on JVM 25 (General)
+- **Wrong**: Using `@Mock` on **any concrete class** (not just `KubernetesClient`) with Mockito's inline mocker on JVM 16+.
+  **Why**: Mockito's inline mocker must instrument `java.lang.Object`, which is in the `java.base` module. On JVM 16+ the module system blocks this for all subclasses of `Object` — meaning every concrete class, not just `KubernetesClient`. `@Mock FluxService` fails with `MockitoException: Could not modify all classes [class FluxService, class java.lang.Object]`.
+  **Correct**: Use hand-written inner class test doubles that subclass or extend the class under test. Override only the methods you need to capture or stub. This pattern avoids any bytecode instrumentation.
+
+### JOSDK 5.3.2 — `DeleteControl` equality
+- **Wrong**: `assertEquals(DeleteControl.defaultDelete(), someDeleteControl)`.
+  **Why**: `DeleteControl` does not override `equals()`. Each call to `defaultDelete()` returns a new instance, so `assertEquals` always fails by reference equality.
+  **Correct**: Assert on `assertTrue(result.isRemoveFinalizer())` (or `assertFalse` for `noFinalizerRemoval()`), which checks the meaningful state of the object.
+
+### JOSDK 5.3.2 — `Cleaner<T>` replaces manual finalizers
+- **Wrong**: Manually calling `controllerutil.AddFinalizer` / `ContainsFinalizer` / `RemoveFinalizer` patterns (Go idiom).
+  **Why**: JOSDK 5.x `Cleaner<T>` manages the full finalizer lifecycle automatically: adds before first reconcile, calls `cleanup()` on deletion, removes after `DeleteControl.defaultDelete()` is returned.
+  **Correct**: Implement `Cleaner<T>` on the reconciler. JOSDK handles the rest.
+
 ### General
 - **Wrong**: Saving a project-level rule (e.g. "integration tests must always run") to personal Claude memory.
   **Why**: Personal memory is for user preferences that span projects; project rules belong in `CLAUDE.md` where they are versioned and visible to all contributors.
   **Correct**: Add project-specific rules directly to `CLAUDE.md`.
 
 ## Current Status
-Days 0–7 complete. All 12 CRDs implemented (Days 1–5), FluxService implemented (Day 6), and TemplateProcessingService / GitHubService / ConfigValidationService implemented (Day 7). Controllers (Days 8–14) are not yet implemented. See `MIGRATION_PLAN.md` for the roadmap.
+Days 0–8 complete. All 12 CRDs (Days 1–5), FluxService (Day 6), TemplateProcessingService / GitHubService / ConfigValidationService (Day 7), BaseRepoReconciler / EnvironmentReconciler (Day 8). Remaining controllers (Days 9–14) are not yet implemented. See `MIGRATION_PLAN.md` for the roadmap.
 
 ## Configuration
 All runtime configuration is in `src/main/resources/application.properties`. Logging is configured in `src/main/resources/logback.xml` (io.kalypso=DEBUG, io.javaoperatorsdk=INFO, io.fabric8=WARN). Never add hard-coded values to source — always add a property key.
