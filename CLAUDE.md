@@ -228,13 +228,23 @@ These are concrete mistakes made during this migration — non-obvious failures 
   **Why**: The `super` path calls `kubernetesClient.resources(...)` which NPEs when the client is `null`. The override must intercept *before* any client call.
   **Correct**: Override the specific package-private method that does the Kubernetes work (e.g. `reconcileDeploymentTargets`), not the top-level `reconcile()`. The top-level method does only status management and can run safely with `null` client as long as the Kubernetes-touching method is overridden.
 
+### fabric8 Version Alignment with JOSDK
+- **Wrong**: Declaring `kubernetes.client.version=6.11.0` (fabric8 6.x) in `pom.xml` while using `javaoperatorsdk=5.3.2`.
+  **Why**: JOSDK 5.3.2 was compiled against fabric8 **7.6.1**. At runtime, `ResourceOperations.addFinalizerWithSSA` calls `HasMetadata.initNameAndNamespaceFrom()` which was added in fabric8 7.x. Using 6.x causes `NoSuchMethodError` thrown in JOSDK's thread pool — all reconciler threads die silently. The operator appears to start (all 8 controllers log "started") but no resource is ever reconciled.
+  **Correct**: `kubernetes.client.version=7.6.1` to match JOSDK 5.3.2's compile-time dependency. The fabric8 6→7 migration (deprecated `CustomResourceList`, `createOrReplace()`) was already done, so the upgrade is safe.
+
+### SSA with managedFields (Integration Tests)
+- **Wrong**: Calling `client.resources(...).resource(fetched).serverSideApply()` after modifying a resource retrieved with `.get()`.
+  **Why**: `.get()` returns the full object including `metadata.managedFields` (server-assigned). Submitting those fields back via SSA causes Kubernetes to reject the request with `metadata.managedFields must be nil`.
+  **Correct**: Call `fetched.getMetadata().setManagedFields(null)` before `serverSideApply()`.
+
 ### General
 - **Wrong**: Saving a project-level rule (e.g. "integration tests must always run") to personal Claude memory.
   **Why**: Personal memory is for user preferences that span projects; project rules belong in `CLAUDE.md` where they are versioned and visible to all contributors.
   **Correct**: Add project-specific rules directly to `CLAUDE.md`.
 
 ## Current Status
-Days 0–13 complete. All 12 CRDs (Days 1–5), FluxService (Day 6), TemplateProcessingService / GitHubService / ConfigValidationService (Day 7), all 8 reconcilers (Days 8–13): BaseRepoReconciler, EnvironmentReconciler, WorkloadRegistrationReconciler, WorkloadReconciler, SchedulingPolicyReconciler, AssignmentReconciler, AssignmentPackageReconciler, GitOpsRepoReconciler. 187 unit tests passing. Only Day 14 (integration tests + end-to-end validation) remains. See `MIGRATION_PLAN.md` for the roadmap.
+All 14 migration days complete. 12 CRDs (Days 1–5), FluxService (Day 6), TemplateProcessingService / GitHubService / ConfigValidationService (Day 7), all 8 reconcilers (Days 8–13), integration tests + end-to-end validation (Day 14). 187 unit tests + 8 reconciler behaviour IT tests passing. See `MIGRATION_PLAN.md` for the roadmap.
 
 ## Configuration
 All runtime configuration is in `src/main/resources/application.properties`. Logging is configured in `src/main/resources/logback.xml` (io.kalypso=DEBUG, io.javaoperatorsdk=INFO, io.fabric8=WARN). Never add hard-coded values to source — always add a property key.
